@@ -26,11 +26,17 @@ echo "tinfoil-ssh-installer: copying static binaries to host ramdisk"
 cp /usr/local/bin/dropbear /usr/local/bin/dropbearkey /usr/local/bin/scp /usr/local/bin/sftp-server "$BASE/bin/"
 chmod +x "$BASE/bin/"*
 
-# 3. Pre-generate host key on the ramdisk
-#    We do this BEFORE starting dropbear so it never tries to write to /etc/dropbear/
-#    (which is on the read-only root filesystem)
-echo "tinfoil-ssh-installer: generating host key"
-"$BASE/bin/dropbearkey" -t ed25519 -f "$BASE/etc/dropbear_ed25519_host_key"
+# 3. Set up host key on the ramdisk
+#    Use SSH_HOST_KEY from secrets if provided (gives stable host identity across deploys),
+#    otherwise generate a new one. Either way, dropbear never writes to /etc/dropbear/.
+if [ -n "$SSH_HOST_KEY" ]; then
+    echo "tinfoil-ssh-installer: using provided host key from secrets"
+    echo "$SSH_HOST_KEY" | base64 -d > "$BASE/etc/dropbear_ed25519_host_key"
+    chmod 600 "$BASE/etc/dropbear_ed25519_host_key"
+else
+    echo "tinfoil-ssh-installer: generating new host key (set SSH_HOST_KEY secret for stable identity)"
+    "$BASE/bin/dropbearkey" -t ed25519 -f "$BASE/etc/dropbear_ed25519_host_key"
+fi
 
 # 4. Write authorized keys to ramdisk
 echo "tinfoil-ssh-installer: writing authorized keys"
