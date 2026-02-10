@@ -9,31 +9,59 @@ if [ -z "$SSH_AUTHORIZED_KEYS" ]; then
     exit 1
 fi
 
-DROPBEAR_DIR=/host/mnt/ramdisk/dropbear
+# Layout on the ramdisk:
+#   /mnt/ramdisk/dropbear/bin/       - dropbear binaries
+#   /mnt/ramdisk/dropbear/lib/       - shared libraries
+#   /mnt/ramdisk/dropbear/etc/       - host keys
+#   /mnt/ramdisk/dropbear/home/      - bind-mounted over /root (clean home dir)
+#   /mnt/ramdisk/dropbear/home/.ssh/ - authorized_keys
+
+BASE=/host/mnt/ramdisk/dropbear
 
 # 1. Set up directory structure on the ramdisk (writable)
 echo "tinfoil-ssh-installer: setting up ramdisk directory"
-mkdir -p "$DROPBEAR_DIR/.ssh"
+mkdir -p "$BASE/bin" "$BASE/lib" "$BASE/etc" "$BASE/home/.ssh"
 
-# 2. Copy dropbear binary from container to CVM host ramdisk
-echo "tinfoil-ssh-installer: copying dropbear to host ramdisk"
-cp /usr/sbin/dropbear "$DROPBEAR_DIR/dropbear"
-chmod +x "$DROPBEAR_DIR/dropbear"
+# 2. Copy dropbear binaries and all shared library dependencies to CVM host ramdisk
+echo "tinfoil-ssh-installer: copying dropbear binaries to host ramdisk"
+cp /usr/sbin/dropbear "$BASE/bin/dropbear"
+cp /usr/bin/dropbearkey "$BASE/bin/dropbearkey"
+chmod +x "$BASE/bin/dropbear" "$BASE/bin/dropbearkey"
 
-# 3. Write authorized keys to ramdisk
+# Copy all shared library dependencies so dropbear can run on the CVM host
+# which may not have these libs installed (e.g., libtomcrypt, libtommath)
+echo "tinfoil-ssh-installer: copying shared libraries"
+for bin in /usr/sbin/dropbear /usr/bin/dropbearkey; do
+    ldd "$bin" | awk '/=>/ {print $3}' | while read -r lib; do
+        if [ -f "$lib" ] && [ ! -f "$BASE/lib/$(basename "$lib")" ]; then
+            cp "$lib" "$BASE/lib/"
+            echo "tinfoil-ssh-installer:   copied $(basename "$lib")"
+        fi
+    done
+done
+
+# 3. Pre-generate host key on the ramdisk
+#    We do this BEFORE starting dropbear so it never tries to write to /etc/dropbear/
+#    (which is on the read-only root filesystem)
+echo "tinfoil-ssh-installer: generating host key"
+LD_LIBRARY_PATH="$BASE/lib" "$BASE/bin/dropbearkey" -t ed25519 -f "$BASE/etc/dropbear_ed25519_host_key"
+
+# 4. Write authorized keys to ramdisk
 echo "tinfoil-ssh-installer: writing authorized keys"
-echo "$SSH_AUTHORIZED_KEYS" > "$DROPBEAR_DIR/.ssh/authorized_keys"
-chmod 700 "$DROPBEAR_DIR/.ssh"
-chmod 600 "$DROPBEAR_DIR/.ssh/authorized_keys"
+echo "$SSH_AUTHORIZED_KEYS" > "$BASE/home/.ssh/authorized_keys"
+chmod 700 "$BASE/home/.ssh"
+chmod 600 "$BASE/home/.ssh/authorized_keys"
 
-# 4. Bind mount ramdisk dropbear dir over /root on the CVM host
+# 5. Bind mount the clean home directory over /root on the CVM host
 #    This works even on a read-only root filesystem (VFS-level overlay).
 #    Dropbear looks for authorized_keys at ~/.ssh/authorized_keys,
 #    so after this mount, /root/.ssh/authorized_keys points to our ramdisk file.
-echo "tinfoil-ssh-installer: bind mounting over /root on host"
-nsenter -t 1 -m -u -i -n -- mount --bind /mnt/ramdisk/dropbear /root
+echo "tinfoil-ssh-installer: bind mounting home over /root on host"
+nsenter -t 1 -m -u -i -n -- mount --bind /mnt/ramdisk/dropbear/home /root
 
-# 5. Write systemd unit to runtime directory (/run/systemd/system/ is writable tmpfs)
+# 6. Write systemd unit to runtime directory (/run/systemd/system/ is writable tmpfs)
+#    Note: no -R flag -- we pre-generated the host key above so dropbear never
+#    needs to write to /etc/dropbear/ (which is read-only).
 echo "tinfoil-ssh-installer: creating systemd service on host"
 cat > /host/run/systemd/system/dropbear-debug.service <<'UNIT'
 [Unit]
@@ -41,7 +69,8 @@ Description=Dropbear SSH Server (Debug)
 After=network.target
 
 [Service]
-ExecStart=/mnt/ramdisk/dropbear/dropbear -F -E -R -r /mnt/ramdisk/dropbear/dropbear_ed25519_host_key -p 22
+Environment=LD_LIBRARY_PATH=/mnt/ramdisk/dropbear/lib
+ExecStart=/mnt/ramdisk/dropbear/bin/dropbear -F -E -r /mnt/ramdisk/dropbear/etc/dropbear_ed25519_host_key -p 22
 Restart=always
 RestartSec=2
 
@@ -49,7 +78,7 @@ RestartSec=2
 WantedBy=multi-user.target
 UNIT
 
-# 6. Start dropbear on the CVM host via nsenter
+# 7. Start dropbear on the CVM host via nsenter
 #    systemd creates the process in its own cgroup, so it survives container exit.
 echo "tinfoil-ssh-installer: starting dropbear on host via systemd"
 nsenter -t 1 -m -u -i -n -- systemctl daemon-reload
