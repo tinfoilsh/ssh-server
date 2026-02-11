@@ -25,9 +25,9 @@ RUN cd dropbear-${DROPBEAR_VERSION} && \
         '#define DEFAULT_ROOT_PATH "/mnt/ramdisk/dropbear/bin:/usr/sbin:/usr/bin:/sbin:/bin"' \
         > localoptions.h && \
     ./configure --disable-harden && \
-    make PROGRAMS="dropbear dropbearkey scp" STATIC=1 -j$(nproc) && \
-    strip dropbear dropbearkey scp && \
-    mkdir -p /opt/bin && cp dropbear dropbearkey scp /opt/bin/
+    make PROGRAMS="dropbear dropbearkey dropbearconvert scp" STATIC=1 -j$(nproc) && \
+    strip dropbear dropbearkey dropbearconvert scp && \
+    mkdir -p /opt/bin && cp dropbear dropbearkey dropbearconvert scp /opt/bin/
 
 # -------------------------------------------------------------------
 # Build OpenSSH sftp-server (static)
