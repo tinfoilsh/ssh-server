@@ -29,16 +29,16 @@ done <<EOF
 $SSH_AUTHORIZED_KEYS
 EOF
 
-# --- Layout on the ramdisk -----------------------------------------------------
-#   /mnt/ramdisk/dropbear/bin/            - static binaries
-#   /mnt/ramdisk/dropbear/etc/            - host key
-#   /mnt/ramdisk/dropbear/authorized_keys - SSH public keys (read via -D flag)
+# --- Layout -------------------------------------------------------------------
+#   /mnt/ramdisk/dropbear/bin/       - static binaries
+#   /mnt/ramdisk/dropbear/etc/       - host key
+#   /mnt/ramdisk/dropbear/ssh/       - bind-mounted over /root/.ssh
 
 BASE=/host/mnt/ramdisk/dropbear
 
 # 1. Directory structure
 log "setting up ramdisk directory"
-mkdir -p "$BASE/bin" "$BASE/etc"
+mkdir -p "$BASE/bin" "$BASE/etc" "$BASE/ssh"
 
 # 2. Copy static binaries (no shared libraries needed)
 log "copying static binaries to host ramdisk"
@@ -74,10 +74,13 @@ else
     "$BASE/bin/dropbearkey" -t ed25519 -f "$HOST_KEY"
 fi
 
-# 4. Write authorized keys
+# 4. Write authorized keys and bind mount over /root/.ssh
 log "writing authorized keys"
-printf '%s\n' "$SSH_AUTHORIZED_KEYS" > "$BASE/authorized_keys"
-chmod 600 "$BASE/authorized_keys"
+printf '%s\n' "$SSH_AUTHORIZED_KEYS" > "$BASE/ssh/authorized_keys"
+chmod 700 "$BASE/ssh"
+chmod 600 "$BASE/ssh/authorized_keys"
+log "bind mounting over /root/.ssh on host"
+nsenter -t 1 -m -u -i -n -- mount --bind /mnt/ramdisk/dropbear/ssh /root/.ssh
 
 # 5. Systemd unit in /run (writable tmpfs)
 log "creating systemd service on host"
@@ -87,7 +90,7 @@ Description=Dropbear SSH Server (Debug)
 After=network.target
 
 [Service]
-ExecStart=/mnt/ramdisk/dropbear/bin/dropbear -F -E -D /mnt/ramdisk/dropbear -p 22
+ExecStart=/mnt/ramdisk/dropbear/bin/dropbear -F -E -p 22
 Restart=always
 RestartSec=2
 
