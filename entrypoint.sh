@@ -75,14 +75,11 @@ else
     "$BASE/bin/dropbearkey" -t ed25519 -f "$HOST_KEY"
 fi
 
-# 4. Write authorized keys and shell profile
+# 4. Write authorized keys
 log "writing authorized keys"
 printf '%s\n' "$SSH_AUTHORIZED_KEYS" > "$BASE/home/.ssh/authorized_keys"
 chmod 700 "$BASE/home/.ssh"
 chmod 600 "$BASE/home/.ssh/authorized_keys"
-
-# Start SSH sessions at / instead of ~ (more useful for debugging)
-printf 'cd /\n' > "$BASE/home/.profile"
 
 # 5. Bind mount clean home over /root on CVM host
 #    Works on read-only root (VFS-level overlay). After this,
