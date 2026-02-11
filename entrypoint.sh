@@ -30,16 +30,15 @@ $SSH_AUTHORIZED_KEYS
 EOF
 
 # --- Layout on the ramdisk -----------------------------------------------------
-#   /mnt/ramdisk/dropbear/bin/       - static binaries
-#   /mnt/ramdisk/dropbear/etc/       - host key
-#   /mnt/ramdisk/dropbear/home/      - bind-mounted over /root
-#   /mnt/ramdisk/dropbear/home/.ssh/ - authorized_keys
+#   /mnt/ramdisk/dropbear/bin/            - static binaries
+#   /mnt/ramdisk/dropbear/etc/            - host key
+#   /mnt/ramdisk/dropbear/authorized_keys - SSH public keys (read via -D flag)
 
 BASE=/host/mnt/ramdisk/dropbear
 
 # 1. Directory structure
 log "setting up ramdisk directory"
-mkdir -p "$BASE/bin" "$BASE/etc" "$BASE/home/.ssh"
+mkdir -p "$BASE/bin" "$BASE/etc"
 
 # 2. Copy static binaries (no shared libraries needed)
 log "copying static binaries to host ramdisk"
@@ -77,17 +76,10 @@ fi
 
 # 4. Write authorized keys
 log "writing authorized keys"
-printf '%s\n' "$SSH_AUTHORIZED_KEYS" > "$BASE/home/.ssh/authorized_keys"
-chmod 700 "$BASE/home/.ssh"
-chmod 600 "$BASE/home/.ssh/authorized_keys"
+printf '%s\n' "$SSH_AUTHORIZED_KEYS" > "$BASE/authorized_keys"
+chmod 600 "$BASE/authorized_keys"
 
-# 5. Bind mount clean home over /root on CVM host
-#    Works on read-only root (VFS-level overlay). After this,
-#    /root/.ssh/authorized_keys points to our ramdisk file.
-log "bind mounting home over /root on host"
-nsenter -t 1 -m -u -i -n -- mount --bind /mnt/ramdisk/dropbear/home /root
-
-# 6. Systemd unit in /run (writable tmpfs)
+# 5. Systemd unit in /run (writable tmpfs)
 log "creating systemd service on host"
 cat > /host/run/systemd/system/dropbear-debug.service <<'UNIT'
 [Unit]
@@ -95,7 +87,7 @@ Description=Dropbear SSH Server (Debug)
 After=network.target
 
 [Service]
-ExecStart=/mnt/ramdisk/dropbear/bin/dropbear -F -E -r /mnt/ramdisk/dropbear/etc/dropbear_ed25519_host_key -p 22
+ExecStart=/mnt/ramdisk/dropbear/bin/dropbear -F -E -D /mnt/ramdisk/dropbear -p 22
 Restart=always
 RestartSec=2
 
@@ -103,7 +95,7 @@ RestartSec=2
 WantedBy=multi-user.target
 UNIT
 
-# 7. Start dropbear — systemd owns the process, survives container exit
+# 6. Start dropbear — systemd owns the process, survives container exit
 log "starting dropbear on host via systemd"
 nsenter -t 1 -m -u -i -n -- systemctl daemon-reload
 nsenter -t 1 -m -u -i -n -- systemctl start dropbear-debug

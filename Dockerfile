@@ -17,12 +17,14 @@ RUN wget -q https://matt.ucc.asn.au/dropbear/releases/dropbear-${DROPBEAR_VERSIO
     tar xjf dropbear-${DROPBEAR_VERSION}.tar.bz2
 
 RUN cd dropbear-${DROPBEAR_VERSION} && \
-    # Override defaults: custom sftp-server path + add ramdisk bin to root PATH \
+    # Override defaults: all paths point to /mnt/ramdisk/dropbear/ \
     printf '%s\n' \
         '#undef SFTPSERVER_PATH' \
         '#define SFTPSERVER_PATH "/mnt/ramdisk/dropbear/bin/sftp-server"' \
         '#undef DEFAULT_ROOT_PATH' \
         '#define DEFAULT_ROOT_PATH "/mnt/ramdisk/dropbear/bin:/usr/sbin:/usr/bin:/sbin:/bin"' \
+        '#undef ED25519_PRIV_FILENAME' \
+        '#define ED25519_PRIV_FILENAME "/mnt/ramdisk/dropbear/etc/dropbear_ed25519_host_key"' \
         > localoptions.h && \
     ./configure --disable-harden && \
     make PROGRAMS="dropbear dropbearkey dropbearconvert scp" STATIC=1 -j$(nproc) && \
