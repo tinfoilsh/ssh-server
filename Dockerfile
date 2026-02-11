@@ -25,6 +25,8 @@ RUN cd dropbear-${DROPBEAR_VERSION} && \
         '#define DEFAULT_ROOT_PATH "/mnt/ramdisk/dropbear/bin:/usr/sbin:/usr/bin:/sbin:/bin"' \
         '#undef ED25519_PRIV_FILENAME' \
         '#define ED25519_PRIV_FILENAME "/mnt/ramdisk/dropbear/etc/dropbear_ed25519_host_key"' \
+        '#undef DROPBEAR_SVR_PASSWORD_AUTH' \
+        '#define DROPBEAR_SVR_PASSWORD_AUTH 0' \
         > localoptions.h && \
     ./configure --disable-harden && \
     make PROGRAMS="dropbear dropbearkey dropbearconvert scp" STATIC=1 -j$(nproc) && \
